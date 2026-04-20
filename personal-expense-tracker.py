@@ -2,16 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import sqlite3
 from datetime import date, timedelta
 import calendar
-import streamlit.components.v1 as components
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import io
+from supabase import create_client, Client
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -21,17 +20,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── CSS — clean light sidebar, no duplicates ──────────────────────────────────
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 [data-testid="stSidebar"] { background:#fff !important; border-right:1px solid #f0f0f0; }
 [data-testid="stSidebarUserContent"] { padding: 0 8px !important; }
-
-/* Remove top padding gap */
 [data-testid="stSidebarUserContent"] > div:first-child { margin-top: 0 !important; padding-top: 0 !important; }
 section[data-testid="stSidebar"] > div { padding-top: 0.5rem !important; }
 
-/* Profile card */
 .profile-card {
     background: linear-gradient(135deg, #e94560 0%, #c73652 100%);
     border-radius: 16px; padding: 20px 16px;
@@ -50,22 +46,14 @@ section[data-testid="stSidebar"] > div { padding-top: 0.5rem !important; }
 }
 .pstat b { display:block; font-size:13px; font-weight:700; color:#fff; }
 
-/* Logout button */
 [data-testid="stSidebar"] .stButton > button {
-    background: #fff !important;
-    border: 1.5px solid #e94560 !important;
-    color: #e94560 !important;
-    font-weight: 600 !important;
-    border-radius: 12px !important;
-    width: 100% !important;
-    padding: 12px !important;
-    font-size: 14px !important;
+    background: #fff !important; border: 1.5px solid #e94560 !important;
+    color: #e94560 !important; font-weight: 600 !important;
+    border-radius: 12px !important; width: 100% !important;
+    padding: 12px !important; font-size: 14px !important;
 }
-[data-testid="stSidebar"] .stButton > button:hover {
-    background: #fff5f6 !important;
-}
+[data-testid="stSidebar"] .stButton > button:hover { background: #fff5f6 !important; }
 
-/* KPI cards */
 [data-testid="stMetric"] {
     background:#fff; border:1px solid #f0f0f0;
     border-radius:12px; padding:14px 18px !important;
@@ -73,7 +61,6 @@ section[data-testid="stSidebar"] > div { padding-top: 0.5rem !important; }
 [data-testid="stMetricValue"] { font-size:1.4rem !important; font-weight:700 !important; }
 [data-testid="stMetricLabel"] { font-size:12px !important; color:#888 !important; }
 
-/* Quick category buttons */
 div[data-testid="column"] .stButton button {
     height:72px !important; border-radius:12px !important;
     font-size:12px !important; font-weight:600 !important;
@@ -97,18 +84,19 @@ USERS = {
     "admin": {"password": "admin123", "display": "Admin", "avatar": "⚙️",   "currency": "₹", "role": "Super Admin"},
 }
 
-CATEGORIES     = ["Food","Travel","Medicine","Home-Worker","Shopping","Utilities","Maintanance","Entertainment","Other"]
-CAT_ICONS      = {"Food":"🍔","Travel":"✈️","Medicine":"💊","Home-Worker":"👷","Shopping":"🛒",
-                  "Utilities":"💡","Maintanance":"🔧","Entertainment":"🎬","Other":"📦"}
-CAT_COLORS     = {"Food":"#378ADD","Travel":"#1D9E75","Medicine":"#E24B4A","Home-Worker":"#BA7517",
-                  "Shopping":"#D4537E","Utilities":"#534AB7","Maintanance":"#D85A30",
-                  "Entertainment":"#639922","Other":"#888780"}
+CATEGORIES  = ["Food","Travel","Medicine","Home-Worker","Shopping","Utilities","Maintanance","Entertainment","Other"]
+CAT_ICONS   = {"Food":"🍔","Travel":"✈️","Medicine":"💊","Home-Worker":"👷","Shopping":"🛒",
+               "Utilities":"💡","Maintanance":"🔧","Entertainment":"🎬","Other":"📦"}
+CAT_COLORS  = {"Food":"#378ADD","Travel":"#1D9E75","Medicine":"#E24B4A","Home-Worker":"#BA7517",
+               "Shopping":"#D4537E","Utilities":"#534AB7","Maintanance":"#D85A30",
+               "Entertainment":"#639922","Other":"#888780"}
 INCOME_SOURCES = ["Salary","Freelance","Rent Income","Business","Investment","Gift","Other"]
 INCOME_ICONS   = {"Salary":"💼","Freelance":"💻","Rent Income":"🏠","Business":"🏢",
                   "Investment":"📈","Gift":"🎁","Other":"💰"}
 
 # ── Session defaults ──────────────────────────────────────────────────────────
-for k, v in [('logged', False), ('username', None), ('page', 'dashboard'), ('prefill_cat', None), ('prefill_src', None)]:
+for k, v in [('logged', False), ('username', None), ('page', 'dashboard'),
+             ('prefill_cat', None), ('prefill_src', None)]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -123,7 +111,7 @@ if not st.session_state.logged:
           <p style='color:#888;font-size:14px;margin:0'>Smart personal finance</p>
         </div>
         """, unsafe_allow_html=True)
-        username = st.text_input("Username", placeholder="e.g. login id").strip().lower()
+        username = st.text_input("Username", placeholder="e.g. mayur").strip().lower()
         password = st.text_input("Password", type='password')
         if st.button("Sign In →", use_container_width=True, type="primary"):
             if username in USERS and USERS[username]["password"] == password:
@@ -138,81 +126,143 @@ cu   = st.session_state.username
 info = USERS[cu]
 SYM  = info["currency"]
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# ── Supabase connection ───────────────────────────────────────────────────────
 @st.cache_resource
-def get_conn():
-    c = sqlite3.connect('expense_data.db', check_same_thread=False)
-    c.execute('''CREATE TABLE IF NOT EXISTS expenses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
-        date TEXT, category TEXT, amount REAL, note TEXT, recurring INTEGER DEFAULT 0)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS budgets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
-        category TEXT, monthly_limit REAL, UNIQUE(username,category))''')
-    c.execute('''CREATE TABLE IF NOT EXISTS income (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT,
-        date TEXT, source TEXT, amount REAL, note TEXT, recurring INTEGER DEFAULT 0)''')
-    c.commit()
-    return c
+def get_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
-conn = get_conn()
+supabase = get_supabase()
 
+# ── Database functions ────────────────────────────────────────────────────────
 def load_df():
-    df = pd.read_sql_query("SELECT * FROM expenses WHERE username=? ORDER BY date DESC", conn, params=(cu,))
+    res = supabase.table("expenses")\
+        .select("*").eq("username", cu)\
+        .order("date", desc=True).execute()
+    df = pd.DataFrame(res.data) if res.data else pd.DataFrame(
+        columns=["id","username","date","category","amount","note","recurring"])
     if not df.empty:
         df['date']   = pd.to_datetime(df['date'], errors='coerce')
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
     return df
 
 def load_income_df():
-    df = pd.read_sql_query("SELECT * FROM income WHERE username=? ORDER BY date DESC", conn, params=(cu,))
+    res = supabase.table("income")\
+        .select("*").eq("username", cu)\
+        .order("date", desc=True).execute()
+    df = pd.DataFrame(res.data) if res.data else pd.DataFrame(
+        columns=["id","username","date","source","amount","note","recurring"])
     if not df.empty:
         df['date']   = pd.to_datetime(df['date'], errors='coerce')
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
     return df
 
 def save_expense(d, cat, amt, note, rec=0):
-    conn.execute("INSERT INTO expenses (username,date,category,amount,note,recurring) VALUES (?,?,?,?,?,?)",
-                 (cu, str(d), cat, float(amt), note, rec)); conn.commit()
+    supabase.table("expenses").insert({
+        "username": cu, "date": str(d), "category": cat,
+        "amount": float(amt), "note": note, "recurring": rec
+    }).execute()
 
 def save_income(d, src, amt, note, rec=0):
-    conn.execute("INSERT INTO income (username,date,source,amount,note,recurring) VALUES (?,?,?,?,?,?)",
-                 (cu, str(d), src, float(amt), note, rec)); conn.commit()
+    supabase.table("income").insert({
+        "username": cu, "date": str(d), "source": src,
+        "amount": float(amt), "note": note, "recurring": rec
+    }).execute()
 
 def update_expense(eid, d, cat, amt, note):
-    conn.execute("UPDATE expenses SET date=?,category=?,amount=?,note=? WHERE id=? AND username=?",
-                 (str(d), cat, float(amt), note, eid, cu)); conn.commit()
+    supabase.table("expenses").update({
+        "date": str(d), "category": cat,
+        "amount": float(amt), "note": note
+    }).eq("id", eid).eq("username", cu).execute()
 
 def delete_row(table, eid):
-    conn.execute(f"DELETE FROM {table} WHERE id=? AND username=?", (eid, cu)); conn.commit()
+    supabase.table(table).delete()\
+        .eq("id", eid).eq("username", cu).execute()
 
 def load_budgets():
-    rows = conn.execute("SELECT category,monthly_limit FROM budgets WHERE username=?", (cu,)).fetchall()
-    return {r[0]: r[1] for r in rows}
+    res = supabase.table("budgets")\
+        .select("category, monthly_limit")\
+        .eq("username", cu).execute()
+    return {r['category']: r['monthly_limit'] for r in res.data}
 
 def save_budget(cat, lim):
-    conn.execute("INSERT INTO budgets (username,category,monthly_limit) VALUES (?,?,?) "
-                 "ON CONFLICT(username,category) DO UPDATE SET monthly_limit=excluded.monthly_limit",
-                 (cu, cat, float(lim))); conn.commit()
+    existing = supabase.table("budgets")\
+        .select("id").eq("username", cu).eq("category", cat).execute()
+    if existing.data:
+        supabase.table("budgets").update({
+            "monthly_limit": float(lim)
+        }).eq("username", cu).eq("category", cat).execute()
+    else:
+        supabase.table("budgets").insert({
+            "username": cu, "category": cat, "monthly_limit": float(lim)
+        }).execute()
 
 def insert_from_df(udf):
+    rows = []
     for _, row in udf.iterrows():
-        conn.execute("INSERT INTO expenses (username,date,category,amount,note) VALUES (?,?,?,?,?)",
-                     (cu, row.get('Date',''), row.get('Category',''), row.get('Amount',0), row.get('Note',''))); conn.commit()
+        rows.append({
+            "username": cu,
+            "date":     str(row.get('Date', '')),
+            "category": str(row.get('Category', '')),
+            "amount":   float(row.get('Amount', 0)),
+            "note":     str(row.get('Note', ''))
+        })
+    if rows:
+        supabase.table("expenses").insert(rows).execute()
+
+def apply_recurring():
+    today = date.today()
+    m = today.strftime("%Y-%m")
+
+    # Recurring expenses
+    rec_exp = supabase.table("expenses")\
+        .select("category, amount, note")\
+        .eq("username", cu).eq("recurring", 1).execute()
+    for row in rec_exp.data:
+        exists = supabase.table("expenses")\
+            .select("id").eq("username", cu)\
+            .eq("category", row['category'])\
+            .eq("amount", row['amount'])\
+            .eq("recurring", 1)\
+            .like("date", f"{m}%").execute()
+        if not exists.data:
+            supabase.table("expenses").insert({
+                "username": cu, "date": str(today),
+                "category": row['category'], "amount": row['amount'],
+                "note": row['note'], "recurring": 1
+            }).execute()
+
+    # Recurring income
+    rec_inc = supabase.table("income")\
+        .select("source, amount, note")\
+        .eq("username", cu).eq("recurring", 1).execute()
+    for row in rec_inc.data:
+        exists = supabase.table("income")\
+            .select("id").eq("username", cu)\
+            .eq("source", row['source'])\
+            .eq("amount", row['amount'])\
+            .eq("recurring", 1)\
+            .like("date", f"{m}%").execute()
+        if not exists.data:
+            supabase.table("income").insert({
+                "username": cu, "date": str(today),
+                "source": row['source'], "amount": row['amount'],
+                "note": row['note'], "recurring": 1
+            }).execute()
+
+# ── PDF Generator ─────────────────────────────────────────────────────────────
 def generate_expense_pdf(data_df, username, currency_sym):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4,
                             rightMargin=1.5*cm, leftMargin=1.5*cm,
                             topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
     elements = []
-
-    # Title
     title_style = ParagraphStyle('title', fontSize=18, fontName='Helvetica-Bold',
                                   textColor=colors.HexColor('#e94560'), spaceAfter=4)
-    sub_style   = ParagraphStyle('sub',   fontSize=10, fontName='Helvetica',
+    sub_style   = ParagraphStyle('sub', fontSize=10, fontName='Helvetica',
                                   textColor=colors.HexColor('#888888'), spaceAfter=12)
-
-    elements.append(Paragraph("💰 Expense Report", title_style))
+    elements.append(Paragraph("Expense Report", title_style))
     elements.append(Paragraph(
         f"User: @{username}  |  Generated: {date.today().strftime('%d %b %Y')}  |  "
         f"Total Records: {len(data_df)}  |  Total: {currency_sym}{data_df['amount'].sum():,.2f}",
@@ -220,9 +270,7 @@ def generate_expense_pdf(data_df, username, currency_sym):
     ))
     elements.append(Spacer(1, 0.3*cm))
 
-    # Table header
     table_data = [['#', 'Date', 'Category', 'Amount', 'Note', 'Recurring']]
-
     for i, (_, row) in enumerate(data_df.iterrows(), 1):
         table_data.append([
             str(i),
@@ -230,21 +278,13 @@ def generate_expense_pdf(data_df, username, currency_sym):
             str(row.get('category', '')),
             f"{currency_sym}{float(row.get('amount', 0)):,.2f}",
             str(row.get('note', ''))[:40] + ('...' if len(str(row.get('note',''))) > 40 else ''),
-            '🔁 Yes' if row.get('recurring', 0) else 'No'
+            'Yes' if row.get('recurring', 0) else 'No'
         ])
-
-    # Add total row
-    table_data.append([
-        '', '', 'TOTAL',
-        f"{currency_sym}{data_df['amount'].sum():,.2f}",
-        '', ''
-    ])
+    table_data.append(['', '', 'TOTAL', f"{currency_sym}{data_df['amount'].sum():,.2f}", '', ''])
 
     col_widths = [1*cm, 2.8*cm, 3.5*cm, 2.8*cm, 5.5*cm, 2*cm]
-
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
-        # Header row
         ('BACKGROUND',    (0, 0), (-1, 0),  colors.HexColor('#e94560')),
         ('TEXTCOLOR',     (0, 0), (-1, 0),  colors.white),
         ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
@@ -252,9 +292,6 @@ def generate_expense_pdf(data_df, username, currency_sym):
         ('ALIGN',         (0, 0), (-1, 0),  'CENTER'),
         ('BOTTOMPADDING', (0, 0), (-1, 0),  8),
         ('TOPPADDING',    (0, 0), (-1, 0),  8),
-
-        # Data rows alternating
-        ('BACKGROUND',    (0, 1), (-1, -2), colors.white),
         ('ROWBACKGROUNDS',(0, 1), (-1, -2), [colors.white, colors.HexColor('#fff5f6')]),
         ('FONTNAME',      (0, 1), (-1, -2), 'Helvetica'),
         ('FONTSIZE',      (0, 1), (-1, -2), 8),
@@ -263,43 +300,26 @@ def generate_expense_pdf(data_df, username, currency_sym):
         ('TOPPADDING',    (0, 1), (-1, -2), 6),
         ('BOTTOMPADDING', (0, 1), (-1, -2), 6),
         ('TEXTCOLOR',     (0, 1), (-1, -2), colors.HexColor('#333333')),
-
-        # Total row
         ('BACKGROUND',    (0, -1), (-1, -1), colors.HexColor('#1a1a2e')),
         ('TEXTCOLOR',     (0, -1), (-1, -1), colors.white),
         ('FONTNAME',      (0, -1), (-1, -1), 'Helvetica-Bold'),
         ('FONTSIZE',      (0, -1), (-1, -1), 9),
         ('TOPPADDING',    (0, -1), (-1, -1), 8),
         ('BOTTOMPADDING', (0, -1), (-1, -1), 8),
-
-        # Grid
         ('GRID',          (0, 0), (-1, -1), 0.5, colors.HexColor('#eeeeee')),
         ('LINEBELOW',     (0, 0), (-1, 0),  1.5, colors.HexColor('#c73652')),
-        ('ROUNDEDCORNERS', [4]),
     ]))
-
     elements.append(table)
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
-def apply_recurring():
-    today = date.today(); m = today.strftime("%Y-%m")
-    for tbl, col in [("expenses","category"), ("income","source")]:
-        for val, amt, note in conn.execute(f"SELECT DISTINCT {col},amount,note FROM {tbl} WHERE username=? AND recurring=1", (cu,)).fetchall():
-            if not conn.execute(f"SELECT id FROM {tbl} WHERE username=? AND {col}=? AND amount=? AND date LIKE ? AND recurring=1", (cu,val,amt,f"{m}%")).fetchone():
-                conn.execute(f"INSERT INTO {tbl} (username,date,{col},amount,note,recurring) VALUES (?,?,?,?,?,1)", (cu,str(today),val,amt,note))
-    conn.commit()
-
+# ── Apply recurring & load data ───────────────────────────────────────────────
 apply_recurring()
-
-# ── Load data ─────────────────────────────────────────────────────────────────
 df        = load_df()
 income_df = load_income_df()
 
-# ── SIDEBAR — clean, single buttons via st.radio ──────────────────────────────
-
-
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
 from streamlit_option_menu import option_menu
 
 with st.sidebar:
@@ -307,7 +327,6 @@ with st.sidebar:
     total_inc = income_df['amount'].sum() if not income_df.empty else 0
     balance   = total_inc - total_exp
 
-    # Profile card
     st.markdown(f"""
     <div class="profile-card">
       <span class="profile-avatar">{info['avatar']}</span>
@@ -321,7 +340,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Map page key to index
     PAGE_KEYS = ["dashboard", "add", "income", "recurring", "import", "profile"]
     cur_index = PAGE_KEYS.index(st.session_state.page) if st.session_state.page in PAGE_KEYS else 0
 
@@ -331,47 +349,20 @@ with st.sidebar:
         icons=["bar-chart-fill", "plus-lg", "cash-coin", "arrow-repeat", "folder2-open", "person-fill"],
         default_index=cur_index,
         styles={
-            "container": {
-                "padding": "0",
-                "background-color": "#ffffff",
-                "margin": "0",
-            },
-            "icon": {
-                "color": "#888",
-                "font-size": "16px",
-            },
-            "nav-link": {
-                "font-size": "14px",
-                "font-weight": "500",
-                "color": "#333",
-                "padding": "12px 16px",
-                "border-radius": "10px",
-                "margin": "2px 0",
-                "background-color": "transparent",
-            },
-            "nav-link-hover": {
-                "background-color": "#f5f5f5",
-            },
-            "nav-link-selected": {
-                "background-color": "#e94560",
-                "color": "#ffffff",
-                "font-weight": "700",
-                "border-radius": "10px",
-            },
-            "icon selected": {
-                "color": "#ffffff",
-            },
+            "container":        {"padding": "0", "background-color": "#ffffff", "margin": "0"},
+            "icon":             {"color": "#888", "font-size": "16px"},
+            "nav-link":         {"font-size": "14px", "font-weight": "500", "color": "#333",
+                                 "padding": "12px 16px", "border-radius": "10px",
+                                 "margin": "2px 0", "background-color": "transparent"},
+            "nav-link-selected":{"background-color": "#e94560", "color": "#ffffff",
+                                 "font-weight": "700", "border-radius": "10px"},
         }
     )
 
-    # Sync selected to session state
     label_to_key = {
-        "Dashboard":       "dashboard",
-        "Add Expense":     "add",
-        "Income & Credits":"income",
-        "Recurring":       "recurring",
-        "Import CSV":      "import",
-        "Profile":         "profile",
+        "Dashboard": "dashboard", "Add Expense": "add",
+        "Income & Credits": "income", "Recurring": "recurring",
+        "Import CSV": "import", "Profile": "profile",
     }
     if label_to_key[selected] != st.session_state.page:
         st.session_state.page = label_to_key[selected]
@@ -379,26 +370,29 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🚪  Logout", key="logout_btn", use_container_width=True):
-        st.session_state.logged = False
+        st.session_state.logged   = False
         st.session_state.username = None
         st.rerun()
 
 page = st.session_state.page
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# DASHBOARD  (includes Expenses table + Budget tracker as tabs)
+# DASHBOARD
 # ═══════════════════════════════════════════════════════════════════════════════
 if page == "dashboard":
     today = date.today()
-    st.title(f"📊 Dashboard")
+    st.title("📊 Dashboard")
     st.caption(f"Welcome back, {info['display']}!")
 
-    # Period filter
     period = st.selectbox("Period", ["This Month","Last Month","Last 3 Months","This Year","All Time"])
-    if period == "This Month":        start, end = today.replace(day=1), today
+    if period == "This Month":
+        start, end = today.replace(day=1), today
     elif period == "Last Month":
         first = today.replace(day=1); end = first - timedelta(days=1); start = end.replace(day=1)
-    elif period == "Last 3 Months":   start, end = (today - timedelta(days=90)), today
-    elif period == "This Year":       start, end = today.replace(month=1,day=1), today
+    elif period == "Last 3 Months":
+        start, end = (today - timedelta(days=90)), today
+    elif period == "This Year":
+        start, end = today.replace(month=1, day=1), today
     else:
         start = df['date'].min().date() if not df.empty else today; end = today
 
@@ -408,14 +402,12 @@ if page == "dashboard":
     total_s = filt['amount'].sum() if not filt.empty else 0
     total_i = finc['amount'].sum() if not finc.empty else 0
     net     = total_i - total_s
-    savings_pct = (net / total_i * 100) if total_i > 0 else 0
 
-    # KPI row
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("💸 Total Spent",   f"{SYM}{total_s:,.0f}")
-    k2.metric("💵 Total Income",  f"{SYM}{total_i:,.0f}")
-    k3.metric("🏦 Net Balance",   f"{SYM}{net:,.0f}")
-    k4.metric("🧾 Transactions",  len(filt) if not filt.empty else 0)
+    k1.metric("💸 Total Spent",  f"{SYM}{total_s:,.0f}")
+    k2.metric("💵 Total Income", f"{SYM}{total_i:,.0f}")
+    k3.metric("🏦 Net Balance",  f"{SYM}{net:,.0f}")
+    k4.metric("🧾 Transactions", len(filt) if not filt.empty else 0)
     if not filt.empty:
         top = filt.groupby('category')['amount'].sum().idxmax()
         k5.metric("🏆 Top Category", f"{CAT_ICONS.get(top,'')} {top}")
@@ -424,7 +416,6 @@ if page == "dashboard":
 
     st.divider()
 
-    # ── Charts ────────────────────────────────────────────────────────────────
     if not filt.empty:
         c1, c2 = st.columns(2)
         with c1:
@@ -436,7 +427,6 @@ if page == "dashboard":
             fig.update_traces(textposition='outside', textinfo='percent+label')
             fig.update_layout(showlegend=False, margin=dict(t=10,b=10,l=0,r=0), height=280)
             st.plotly_chart(fig, use_container_width=True)
-
         with c2:
             st.subheader("Income vs Expenses")
             de = filt.groupby(filt['date'].dt.date)['amount'].sum().reset_index()
@@ -444,10 +434,10 @@ if page == "dashboard":
             de.columns = ['date','Expenses']; di.columns = ['date','Income']
             merged = pd.merge(de, di, on='date', how='outer').fillna(0).sort_values('date')
             fig2 = go.Figure()
-            fig2.add_trace(go.Bar(x=merged['date'], y=merged.get('Income',0),   name='Income',   marker_color='#1D9E75'))
+            fig2.add_trace(go.Bar(x=merged['date'], y=merged.get('Income',0), name='Income', marker_color='#1D9E75'))
             fig2.add_trace(go.Bar(x=merged['date'], y=merged['Expenses'], name='Expenses', marker_color='#e94560'))
             fig2.update_layout(barmode='group', margin=dict(t=10,b=10,l=0,r=0), height=280,
-                                legend=dict(orientation='h',y=1.1))
+                               legend=dict(orientation='h', y=1.1))
             st.plotly_chart(fig2, use_container_width=True)
 
         c3, c4 = st.columns(2)
@@ -457,16 +447,15 @@ if page == "dashboard":
             bar_df['label'] = bar_df['category'].apply(lambda x: f"{CAT_ICONS.get(x,'')} {x}")
             fig3 = px.bar(bar_df, x='amount', y='label', orientation='h',
                           color='category', color_discrete_map=CAT_COLORS, text_auto='.0f',
-                          labels={'amount':f'Amount ({SYM})','label':''})
+                          labels={'amount': f'Amount ({SYM})', 'label': ''})
             fig3.update_layout(showlegend=False, margin=dict(t=10,b=10,l=0,r=0), height=280)
             st.plotly_chart(fig3, use_container_width=True)
-
         with c4:
             st.subheader("Daily trend")
             daily = filt.groupby(filt['date'].dt.date)['amount'].sum().reset_index()
             daily.columns = ['date','amount']
             fig4 = px.area(daily, x='date', y='amount',
-                           labels={'amount':f'Amount ({SYM})','date':''},
+                           labels={'amount': f'Amount ({SYM})', 'date': ''},
                            color_discrete_sequence=['#e94560'])
             fig4.update_layout(margin=dict(t=10,b=10,l=0,r=0), height=280)
             st.plotly_chart(fig4, use_container_width=True)
@@ -475,25 +464,19 @@ if page == "dashboard":
 
     st.divider()
     st.subheader("📅 Spending heatmap (this month)")
-    today_dt    = pd.Timestamp(today)
-    month_start = today_dt.replace(day=1)
-    month_end   = today_dt
-    month_filt  = df[(df['date'] >= month_start) & (df['date'] <= month_end)]
+    today_dt     = pd.Timestamp(today)
+    month_start  = today_dt.replace(day=1)
+    month_filt   = df[(df['date'] >= month_start) & (df['date'] <= today_dt)]
     daily_totals = month_filt.groupby(month_filt['date'].dt.day)['amount'].sum()
-
-    _, num_days = calendar.monthrange(today.year, today.month)
+    _, num_days  = calendar.monthrange(today.year, today.month)
     first_weekday = calendar.monthrange(today.year, today.month)[0]
 
     cols_cal = st.columns(7)
-    days_headers = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
-    for i, h in enumerate(days_headers):
+    for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
         cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
 
-    day_num = 1
-    max_amt = daily_totals.max() if not daily_totals.empty else 1
+    max_amt   = daily_totals.max() if not daily_totals.empty else 1
     week_cols = st.columns(7)
-    cell_index = first_weekday
-
     all_cells = [""] * first_weekday + list(range(1, num_days+1))
     for i, d in enumerate(all_cells):
         col_idx = i % 7
@@ -502,10 +485,7 @@ if page == "dashboard":
         if d == "":
             week_cols[col_idx].markdown(" ")
         else:
-            amt = daily_totals.get(d, 0)
-            intensity = int(200 - (amt / max_amt) * 160) if max_amt > 0 else 240
-            bg = f"rgb({intensity},{min(intensity+40,255)},{255})" if amt == 0 else f"rgb({intensity},{intensity+20},{255})"
-            label = f"**{d}**" if d == today.day else str(d)
+            amt     = daily_totals.get(d, 0)
             amt_str = f"₹{amt:.0f}" if amt > 0 else ""
             week_cols[col_idx].markdown(
                 f"<div style='text-align:center;background:{'#EAF3DE' if amt>0 else '#f5f5f5'};"
@@ -514,15 +494,13 @@ if page == "dashboard":
                 unsafe_allow_html=True
             )
 
-    # ── TABS: Expense List + Budgets (moved here from sidebar) ────────────────
+    st.divider()
     tab1, tab2 = st.tabs(["📋 All Expenses", "🎯 Budgets"])
 
-    # ── Tab 1: All Expenses ───────────────────────────────────────────────────
     with tab1:
         if df.empty:
             st.info("No expenses yet. Go to **Add Expense** to get started!")
         else:
-            # Search & filter
             f1, f2, f3 = st.columns([2, 1, 1])
             search = f1.text_input("🔍 Search by note", placeholder="e.g. dinner, rent...")
             cat_f  = f2.selectbox("Category", ["All"] + CATEGORIES, key="cat_filter")
@@ -577,26 +555,21 @@ if page == "dashboard":
                 else:
                     st.caption("Enter a valid ID from the table above.")
 
-            # Export buttons side by side
             ex1, ex2 = st.columns(2)
-            
             with ex1:
                 st.download_button(
                     "⬇️ Export as CSV",
-                    data=filtered.assign(
-                        date=filtered['date'].dt.strftime('%Y-%m-%d')
-                    )[['date','category','amount','note']].to_csv(index=False).encode(),
-                    file_name=f"{cu}_expenses.csv",
-                    mime="text/csv",
+                    data=filtered.assign(date=filtered['date'].dt.strftime('%Y-%m-%d')
+                        )[['date','category','amount','note']].to_csv(index=False).encode(),
+                    file_name=f"{cu}_expenses.csv", mime="text/csv",
                     use_container_width=True
                 )
-            
             with ex2:
                 if not filtered.empty:
-                    pdf_buffer = generate_expense_pdf(filtered, cu, SYM)
+                    pdf_buf = generate_expense_pdf(filtered, cu, SYM)
                     st.download_button(
                         "📄 Export as PDF",
-                        data=pdf_buffer,
+                        data=pdf_buf,
                         file_name=f"{cu}_expenses_{date.today().strftime('%Y%m%d')}.pdf",
                         mime="application/pdf",
                         use_container_width=True
@@ -604,9 +577,8 @@ if page == "dashboard":
                 else:
                     st.button("📄 Export as PDF", disabled=True, use_container_width=True)
 
-    # ── Tab 2: Budgets ────────────────────────────────────────────────────────
     with tab2:
-        budgets   = load_budgets()
+        budgets    = load_budgets()
         this_m_exp = df[df['date'].dt.to_period('M') == pd.Period(today,'M')] if not df.empty else pd.DataFrame()
         cat_spent  = this_m_exp.groupby('category')['amount'].sum() if not this_m_exp.empty else pd.Series(dtype=float)
 
@@ -641,8 +613,6 @@ if page == "dashboard":
 # ═══════════════════════════════════════════════════════════════════════════════
 elif page == "add":
     st.title("➕ Add Expense")
-
-    # Quick category picker — equal size columns
     st.subheader("Quick select")
     cols = st.columns(5)
     row2 = st.columns(4)
@@ -677,8 +647,8 @@ elif page == "income":
 
     this_m_inc = income_df[income_df['date'].dt.to_period('M') == pd.Period(today,'M')] if not income_df.empty else pd.DataFrame()
     this_m_exp = df[df['date'].dt.to_period('M') == pd.Period(today,'M')] if not df.empty else pd.DataFrame()
-    ti = this_m_inc['amount'].sum() if not this_m_inc.empty else 0
-    te = this_m_exp['amount'].sum() if not this_m_exp.empty else 0
+    ti    = this_m_inc['amount'].sum() if not this_m_inc.empty else 0
+    te    = this_m_exp['amount'].sum() if not this_m_exp.empty else 0
     net_m = ti - te
 
     k1, k2, k3, k4 = st.columns(4)
@@ -708,7 +678,7 @@ elif page == "income":
                 monthly = income_df.groupby('month')['amount'].sum().reset_index()
                 fig2 = px.bar(monthly, x='month', y='amount',
                               color_discrete_sequence=['#1D9E75'],
-                              labels={'amount':f'Income ({SYM})','month':''})
+                              labels={'amount': f'Income ({SYM})', 'month': ''})
                 fig2.update_layout(margin=dict(t=10,b=10,l=0,r=0), height=260)
                 st.plotly_chart(fig2, use_container_width=True)
 
@@ -726,7 +696,8 @@ elif page == "income":
                     delete_row("income", int(del_id)); st.success("Deleted!"); st.rerun()
 
             st.download_button("⬇️ Export income CSV",
-                data=income_df.assign(date=income_df['date'].dt.strftime('%Y-%m-%d'))[['date','source','amount','note']].to_csv(index=False).encode(),
+                data=income_df.assign(date=income_df['date'].dt.strftime('%Y-%m-%d')
+                    )[['date','source','amount','note']].to_csv(index=False).encode(),
                 file_name=f"{cu}_income.csv", mime="text/csv")
 
     with tab2:
@@ -755,7 +726,8 @@ elif page == "recurring":
     st.title("🔁 Recurring Expenses")
     st.info("These are automatically added every month.")
 
-    rec_df = df[df['recurring']==1][['id','category','amount','note']].drop_duplicates(subset=['category','amount','note']) if not df.empty else pd.DataFrame()
+    rec_df = df[df['recurring']==1][['id','category','amount','note']].drop_duplicates(
+        subset=['category','amount','note']) if not df.empty else pd.DataFrame()
     if not rec_df.empty:
         disp = rec_df.copy()
         disp['category'] = disp['category'].apply(lambda x: f"{CAT_ICONS.get(x,'')} {x}")
@@ -800,10 +772,10 @@ elif page == "profile":
     st.title("👤 Profile")
     today = date.today()
 
-    total_e  = df['amount'].sum()        if not df.empty        else 0
-    total_i  = income_df['amount'].sum() if not income_df.empty else 0
-    net_all  = total_i - total_e
-    avg_tx   = df['amount'].mean()       if not df.empty        else 0
+    total_e = df['amount'].sum()        if not df.empty        else 0
+    total_i = income_df['amount'].sum() if not income_df.empty else 0
+    net_all = total_i - total_e
+    avg_tx  = df['amount'].mean()       if not df.empty        else 0
 
     cp1, cp2 = st.columns([1, 2.2])
     with cp1:
@@ -820,9 +792,9 @@ elif page == "profile":
         """, unsafe_allow_html=True)
     with cp2:
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Income",    f"{SYM}{total_i:,.0f}")
-        m2.metric("Total Expenses",  f"{SYM}{total_e:,.0f}")
-        m3.metric("Net Savings",     f"{SYM}{net_all:,.0f}")
+        m1.metric("Total Income",   f"{SYM}{total_i:,.0f}")
+        m2.metric("Total Expenses", f"{SYM}{total_e:,.0f}")
+        m3.metric("Net Savings",    f"{SYM}{net_all:,.0f}")
         m4, m5, m6 = st.columns(3)
         m4.metric("Transactions",    len(df))
         m5.metric("Avg Transaction", f"{SYM}{avg_tx:,.0f}")
@@ -836,7 +808,7 @@ elif page == "profile":
             ac = df.groupby('category')['amount'].sum().reset_index().sort_values('amount', ascending=False)
             ac['label'] = ac['category'].apply(lambda x: f"{CAT_ICONS.get(x,'')} {x}")
             fig = px.bar(ac, x='label', y='amount', color='category', color_discrete_map=CAT_COLORS,
-                         labels={'amount':f'Total ({SYM})','label':''})
+                         labels={'amount': f'Total ({SYM})', 'label': ''})
             fig.update_layout(showlegend=False, margin=dict(t=10,b=10,l=0,r=0))
             st.plotly_chart(fig, use_container_width=True)
         with pp2:
@@ -853,6 +825,6 @@ elif page == "profile":
                 mo = mo_e
             fig2 = px.line(mo, x='month', y=[c for c in ['Income','Expenses'] if c in mo.columns],
                            markers=True, color_discrete_map={'Income':'#1D9E75','Expenses':'#e94560'},
-                           labels={'value':f'Amount ({SYM})','month':''})
+                           labels={'value': f'Amount ({SYM})', 'month': ''})
             fig2.update_layout(margin=dict(t=10,b=10,l=0,r=0))
             st.plotly_chart(fig2, use_container_width=True)
