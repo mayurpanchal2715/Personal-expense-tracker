@@ -123,7 +123,7 @@ if not st.session_state.logged:
           <p style='color:#888;font-size:14px;margin:0'>Smart personal finance</p>
         </div>
         """, unsafe_allow_html=True)
-        username = st.text_input("Username", placeholder="e.g. mayur").strip().lower()
+        username = st.text_input("Username", placeholder="e.g. login id").strip().lower()
         password = st.text_input("Password", type='password')
         if st.button("Sign In →", use_container_width=True, type="primary"):
             if username in USERS and USERS[username]["password"] == password:
@@ -132,7 +132,6 @@ if not st.session_state.logged:
                 st.rerun()
             else:
                 st.error("Invalid username or password")
-        st.caption("Demo: mayur/mayur123 · mahi/mahi123 · admin/admin123")
     st.stop()
 
 cu   = st.session_state.username
