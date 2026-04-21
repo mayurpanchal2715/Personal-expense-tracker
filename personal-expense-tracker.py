@@ -507,26 +507,6 @@ if page == "dashboard":
                 )
     
 
-
-   
-    week_cols = st.columns(7)
-    all_cells = [""] * first_weekday + list(range(1, num_days+1))
-    for i, d in enumerate(all_cells):
-        col_idx = i % 7
-        if i % 7 == 0 and i > 0:
-            week_cols = st.columns(7)
-        if d == "":
-            week_cols[col_idx].markdown(" ")
-        else:
-            amt     = daily_totals.get(d, 0)
-            amt_str = f"₹{amt:.0f}" if amt > 0 else ""
-            week_cols[col_idx].markdown(
-                f"<div style='text-align:center;background:{'#EAF3DE' if amt>0 else '#f5f5f5'};"
-                f"border-radius:6px;padding:4px 2px;font-size:12px;margin:1px'>"
-                f"<b>{d}</b><br><span style='color:#27500A;font-size:10px'>{amt_str}</span></div>",
-                unsafe_allow_html=True
-            )
-
     st.divider()
     tab1, tab2 = st.tabs(["📋 All Expenses", "🎯 Budgets"])
 
