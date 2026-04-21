@@ -478,34 +478,34 @@ if page == "dashboard":
     
     month_filt = df[(df['date'] >= hm_start) & (df['date'] <= hm_end)] if not df.empty else pd.DataFrame()
 
-if month_filt.empty:
-    st.info(f"📭 No expenses found for {calendar.month_name[hm_month]} {int(hm_year)}")
-else:
-    daily_totals = month_filt.groupby(month_filt['date'].dt.day)['amount'].sum()
-    first_weekday = calendar.monthrange(int(hm_year), hm_month)[0]
-
-    cols_cal = st.columns(7)
-    for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
-        cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
-
-    week_cols = st.columns(7)
-    all_cells = [""] * first_weekday + list(range(1, num_days+1))
-    for i, d in enumerate(all_cells):
-        col_idx = i % 7
-        if i % 7 == 0 and i > 0:
-            week_cols = st.columns(7)
-        if d == "":
-            week_cols[col_idx].markdown(" ")
-        else:
-            amt     = daily_totals.get(d, 0)
-            amt_str = f"₹{amt:.0f}" if amt > 0 else ""
-            week_cols[col_idx].markdown(
-                f"<div style='text-align:center;background:{'#EAF3DE' if amt>0 else '#f5f5f5'};"
-                f"border-radius:6px;padding:4px 2px;font-size:12px;margin:1px'>"
-                f"<b>{d}</b><br><span style='color:#27500A;font-size:10px'>{amt_str}</span></div>",
-                unsafe_allow_html=True
-            )
-
+    if month_filt.empty:
+        st.info(f"📭 No expenses found for {calendar.month_name[hm_month]} {int(hm_year)}")
+    else:
+        daily_totals = month_filt.groupby(month_filt['date'].dt.day)['amount'].sum()
+        first_weekday = calendar.monthrange(int(hm_year), hm_month)[0]
+    
+        cols_cal = st.columns(7)
+        for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
+            cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
+    
+        week_cols = st.columns(7)
+        all_cells = [""] * first_weekday + list(range(1, num_days+1))
+        for i, d in enumerate(all_cells):
+            col_idx = i % 7
+            if i % 7 == 0 and i > 0:
+                week_cols = st.columns(7)
+            if d == "":
+                week_cols[col_idx].markdown(" ")
+            else:
+                amt     = daily_totals.get(d, 0)
+                amt_str = f"₹{amt:.0f}" if amt > 0 else ""
+                week_cols[col_idx].markdown(
+                    f"<div style='text-align:center;background:{'#EAF3DE' if amt>0 else '#f5f5f5'};"
+                    f"border-radius:6px;padding:4px 2px;font-size:12px;margin:1px'>"
+                    f"<b>{d}</b><br><span style='color:#27500A;font-size:10px'>{amt_str}</span></div>",
+                    unsafe_allow_html=True
+                )
+    
     cols_cal = st.columns(7)
     for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
         cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
