@@ -1,63 +1,112 @@
 # 💰 Expense Tracker Web Application
-A personal finance management web application built with Python and Streamlit that helps users track daily expenses, manage income, analyze spending patterns, and monitor budgets with interactive visualizations.
 
-### 🚀 Features
-📊 Interactive Dashboard for expense and income insights
-💸 Add & Manage Expenses with categories
-💵 Income Tracking System
-🔁 Recurring Transactions support
-🎯 Monthly Budget Tracking
-📈 Data Visualization using Plotly
-📅 Daily Expense Heatmap
-📂 CSV Import for Bulk Expenses
-📄 Export Reports (CSV & PDF)
-👤 User Login System
-🗄 SQLite Database Integration
+A personal finance management web application built using Python and Streamlit that allows users to track daily expenses, manage income, monitor budgets, and visualize financial data through interactive dashboards.
 
-### 🛠 Tech Stack
-Python
-Streamlit
-SQLite
-Pandas
-Plotly
-ReportLab (PDF generation)
+---
 
-### 📦 Installation
-1️⃣ Clone the repository
+## 🚀 Features
+
+- 📊 Interactive financial dashboard
+- 💸 Add and manage daily expenses
+- 💵 Track income sources
+- 🔁 Recurring expense management
+- 🎯 Monthly budget tracking
+- 📈 Data visualization with Plotly
+- 📅 Daily expense heatmap
+- 📂 Import expenses via CSV
+- 📄 Export reports as CSV and PDF
+- 👤 Multi-user login system
+- 🗄 SQLite database storage
+
+---
+
+## 🛠 Tech Stack
+
+- **Python**
+- **Streamlit**
+- **Supabase**
+- **Pandas**
+- **Plotly**
+- **ReportLab**
+
+---
+
+## 📦 Installation
+
+1. Clone the repository
+
 git clone https://github.com/yourusername/expense-tracker.git
-2️⃣ Navigate to project folder
+
+2. Navigate to the project folder
+
 cd expense-tracker
-3️⃣ Install dependencies
+
+3. Install dependencies
+
 pip install -r requirements.txt
-4️⃣ Run the application
-streamlit run personal-expense-tracker.py
 
-### 📁 Project Structure
-expense-tracker
-│
-├── personal-expense-tracker.py        # Main Streamlit application
-├── expense_data.db                    # SQLite database
-├── requirements.txt                   # Python dependencies
-├── README.md
-└── .streamlit
-    └── config.toml
+4. Run the application
 
-### 📊 Application Modules
-Dashboard – Overview of expenses and income
-Add Expense – Record daily expenses
-Income Management – Track income sources
-Recurring Transactions – Automatic monthly entries
-Budget Management – Set monthly spending limits
-Import Data – Upload expenses via CSV
-Profile Analytics – Personal financial insights
+streamlit run xyz.py
 
-###🎯 Use Cases
-Personal expense tracking
-Monthly budgeting
-Financial data visualization
-Learning Streamlit & Data Analytics
+---
 
-### 👨‍💻 Author
-Mayur Panchal
-🎓 B.Tech CSE Student
-💻 Data Science & AI Enthusiast
+## 📁 Project Structure
+
+- expense-tracker
+- │
+- ├── xyz.py
+- ├── expense_data.db
+- ├── requirements.txt
+- ├── README.md
+- └── .streamlit
+-    └── config.toml
+
+---
+
+## 📊 Application Modules
+
+Dashboard  
+Displays overview of income, expenses, and financial insights with charts.
+
+Add Expense  
+Allows users to record daily expenses with category and description.
+
+Income & Credits  
+Manage and track income from different sources.
+
+Recurring Transactions  
+Automatically add recurring monthly expenses or income.
+
+Budget Tracker  
+Set category-wise monthly spending limits.
+
+Import CSV  
+Upload multiple expense records using CSV files.
+
+Profile Analytics  
+Shows financial statistics and spending patterns.
+
+---
+
+## 🎯 Use Cases
+
+Personal expense tracking  
+Monthly budgeting  
+Financial data visualization  
+Learning Streamlit for data applications
+
+---
+
+## 👨‍💻 Author
+
+Mayur Panchal  
+
+B.Tech CSE Student  
+Data Science & AI Enthusiast
+
+---
+
+## 📜 License
+
+This project is open source and available under the MIT License.
