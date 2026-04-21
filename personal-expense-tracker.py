@@ -649,7 +649,6 @@ elif page == "add":
             save_expense(exp_date, exp_cat, exp_amt, exp_note, int(exp_rec))
             st.success(f"✅ {CAT_ICONS.get(exp_cat,'')} {SYM}{exp_amt:,.2f} added to **{exp_cat}**!")
             st.session_state.prefill_cat = None
-            st.balloons()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INCOME & CREDITS
@@ -730,7 +729,7 @@ elif page == "income":
             if st.form_submit_button("💾 Save Income", use_container_width=True, type="primary"):
                 save_income(inc_date, inc_src, inc_amt, inc_note, int(inc_rec))
                 st.success(f"✅ {SYM}{inc_amt:,.2f} from **{inc_src}** saved!")
-                st.session_state.prefill_src = None; st.balloons()
+                st.session_state.prefill_src = None; 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RECURRING
