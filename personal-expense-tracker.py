@@ -120,6 +120,7 @@ if not st.session_state.logged:
                 st.rerun()
             else:
                 st.error("Invalid username or password")
+        st.caption("Demo:admin/admin123")
     st.stop()
 
 cu   = st.session_state.username
