@@ -10,6 +10,7 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 import io
+import hashlib
 from supabase import create_client, Client
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -74,15 +75,20 @@ div[data-testid="column"] .stButton button:hover {
 }
 .stProgress > div > div { background-color:#e94560 !important; border-radius:10px; }
 .block-container { padding-top:1.2rem; }
+
+/* Auth card */
+.auth-card {
+    background: #fff;
+    border: 1px solid #f0f0f0;
+    border-radius: 20px;
+    padding: 32px 28px;
+    box-shadow: 0 4px 24px rgba(233,69,96,0.08);
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-USERS = {
-    "mayur": {"password": "mayur123", "display": "Mayur", "avatar": "👨‍💻", "currency": "₹", "role": "Admin"},
-    "mahi":  {"password": "mahi123",  "display": "Mahi",  "avatar": "👩‍💼", "currency": "₹", "role": "Member"},
-    "admin": {"password": "admin123", "display": "Admin", "avatar": "⚙️",   "currency": "₹", "role": "Super Admin"},
-}
+AVATAR_OPTIONS = ["👨‍💻","👩‍💼","🧑‍🎨","👨‍🍳","👩‍🔬","🧑‍💼","👨‍🎓","👩‍🏫","🧑‍🚀","😎","🦸","🧙"]
 
 CATEGORIES  = ["Food","Travel","Medicine","Home-Worker","Shopping","Utilities","Maintanance","Entertainment","Other"]
 CAT_ICONS   = {"Food":"🍔","Travel":"✈️","Medicine":"💊","Home-Worker":"👷","Shopping":"🛒",
@@ -96,36 +102,9 @@ INCOME_ICONS   = {"Salary":"💼","Freelance":"💻","Rent Income":"🏠","Busin
 
 # ── Session defaults ──────────────────────────────────────────────────────────
 for k, v in [('logged', False), ('username', None), ('page', 'dashboard'),
-             ('prefill_cat', None), ('prefill_src', None)]:
+             ('prefill_cat', None), ('prefill_src', None), ('auth_mode', 'login')]:
     if k not in st.session_state:
         st.session_state[k] = v
-
-# ── Login ─────────────────────────────────────────────────────────────────────
-if not st.session_state.logged:
-    _, col, _ = st.columns([1, 1.2, 1])
-    with col:
-        st.markdown("""
-        <div style='text-align:center;padding:32px 0 20px'>
-          <div style='font-size:52px'>💰</div>
-          <h2 style='margin:8px 0 4px;color:#1a1a2e'>Expense Tracker</h2>
-          <p style='color:#888;font-size:14px;margin:0'>Smart personal finance</p>
-        </div>
-        """, unsafe_allow_html=True)
-        username = st.text_input("Username", placeholder="e.g. mayur").strip().lower()
-        password = st.text_input("Password", type='password')
-        if st.button("Sign In →", use_container_width=True, type="primary"):
-            if username in USERS and USERS[username]["password"] == password:
-                st.session_state.logged   = True
-                st.session_state.username = username
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
-        st.caption("Demo:admin/admin123")
-    st.stop()
-
-cu   = st.session_state.username
-info = USERS[cu]
-SYM  = info["currency"]
 
 # ── Supabase connection ───────────────────────────────────────────────────────
 @st.cache_resource
@@ -135,6 +114,178 @@ def get_supabase() -> Client:
     return create_client(url, key)
 
 supabase = get_supabase()
+
+# ── Password hashing ──────────────────────────────────────────────────────────
+def hash_password(password: str) -> str:
+    """Hash password using SHA-256."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# ── User auth functions ───────────────────────────────────────────────────────
+def get_user(username: str):
+    """Fetch user record from Supabase users table."""
+    res = supabase.table("users").select("*").eq("username", username).execute()
+    return res.data[0] if res.data else None
+
+def register_user(username: str, display_name: str, password: str, avatar: str) -> tuple[bool, str]:
+    """Register a new user. Returns (success, message)."""
+    username = username.strip().lower()
+
+    # Validation
+    if len(username) < 3:
+        return False, "Username must be at least 3 characters."
+    if not username.isalnum():
+        return False, "Username can only contain letters and numbers."
+    if len(display_name.strip()) < 2:
+        return False, "Display name must be at least 2 characters."
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters."
+
+    # Check duplicate
+    existing = get_user(username)
+    if existing:
+        return False, f"Username **@{username}** is already taken. Please choose another."
+
+    # Insert new user
+    supabase.table("users").insert({
+        "username":     username,
+        "display_name": display_name.strip(),
+        "password_hash": hash_password(password),
+        "avatar":       avatar,
+        "role":         "Member",
+        "currency":     "₹",
+        "created_at":   str(date.today())
+    }).execute()
+    return True, "Account created successfully!"
+
+def login_user(username: str, password: str) -> tuple[bool, str, dict | None]:
+    """Verify login. Returns (success, message, user_data)."""
+    username = username.strip().lower()
+    user = get_user(username)
+    if not user:
+        return False, "No account found with that username.", None
+
+    # Support both hashed and legacy plain passwords (for seeded admin/demo)
+    stored = user.get("password_hash", "")
+    if stored == hash_password(password) or stored == password:
+        return True, "Login successful!", user
+    return False, "Incorrect password.", None
+
+def get_user_info(username: str) -> dict:
+    """Build info dict similar to the old static USERS dict."""
+    user = get_user(username)
+    if user:
+        return {
+            "display":  user.get("display_name", username.capitalize()),
+            "avatar":   user.get("avatar", "👤"),
+            "currency": user.get("currency", "₹"),
+            "role":     user.get("role", "Member"),
+        }
+    # Fallback (shouldn't happen when logged in)
+    return {"display": username, "avatar": "👤", "currency": "₹", "role": "Member"}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTH SCREEN  (Login + Register)
+# ─────────────────────────────────────────────────────────────────────────────
+if not st.session_state.logged:
+    _, col, _ = st.columns([1, 1.3, 1])
+    with col:
+        # ── Branding ──────────────────────────────────────────────────────────
+        st.markdown("""
+        <div style='text-align:center;padding:28px 0 18px'>
+          <div style='font-size:52px'>💰</div>
+          <h2 style='margin:8px 0 4px;color:#1a1a2e'>Expense Tracker</h2>
+          <p style='color:#888;font-size:14px;margin:0'>Smart personal finance</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── Tab toggle ────────────────────────────────────────────────────────
+        tab_login, tab_reg = st.tabs(["🔑  Sign In", "✨  Create Account"])
+
+        # ════════════════════════════════════════════════════════════════════
+        # LOGIN TAB
+        # ════════════════════════════════════════════════════════════════════
+        with tab_login:
+            st.markdown("<br>", unsafe_allow_html=True)
+            username = st.text_input("Username", placeholder="e.g. mayur", key="li_user").strip().lower()
+            password = st.text_input("Password", type='password', key="li_pass")
+
+            if st.button("Sign In →", use_container_width=True, type="primary", key="login_btn"):
+                if not username or not password:
+                    st.error("Please enter both username and password.")
+                else:
+                    ok, msg, user_data = login_user(username, password)
+                    if ok:
+                        st.session_state.logged   = True
+                        st.session_state.username = username
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            st.caption("Demo accounts: **admin** / admin123")
+
+        # ════════════════════════════════════════════════════════════════════
+        # REGISTER TAB
+        # ════════════════════════════════════════════════════════════════════
+        with tab_reg:
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            r_username = st.text_input(
+                "Username *",
+                placeholder="e.g. mayur11  (letters & numbers only)",
+                key="reg_user"
+            ).strip().lower()
+
+            r_display = st.text_input(
+                "Display Name *",
+                placeholder="e.g. Mayur Panchal",
+                key="reg_display"
+            )
+
+            r_avatar = st.selectbox(
+                "Pick an avatar",
+                AVATAR_OPTIONS,
+                key="reg_avatar",
+                format_func=lambda x: x
+            )
+
+            r_pass1 = st.text_input("Password *", type='password',
+                                    placeholder="Min 6 characters", key="reg_p1")
+            r_pass2 = st.text_input("Confirm Password *", type='password',
+                                    placeholder="Repeat password", key="reg_p2")
+
+            # Live username hint
+            if r_username:
+                exists = get_user(r_username)
+                if exists:
+                    st.warning(f"⚠️ @{r_username} is already taken")
+                elif len(r_username) >= 3 and r_username.isalnum():
+                    st.success(f"✅ @{r_username} is available")
+
+            if st.button("🚀  Create My Account", use_container_width=True,
+                         type="primary", key="register_btn"):
+                # Client-side checks
+                if not r_username or not r_display or not r_pass1 or not r_pass2:
+                    st.error("Please fill in all required fields.")
+                elif r_pass1 != r_pass2:
+                    st.error("Passwords do not match.")
+                else:
+                    ok, msg = register_user(r_username, r_display, r_pass1, r_avatar)
+                    if ok:
+                        st.success(f"🎉 {msg}  Welcome, **{r_display}**! Please sign in.")
+                        st.balloons()
+                    else:
+                        st.error(msg)
+
+            st.caption("Your data is private and only visible to you.")
+
+    st.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGGED-IN SECTION
+# ─────────────────────────────────────────────────────────────────────────────
+cu   = st.session_state.username
+info = get_user_info(cu)
+SYM  = info["currency"]
 
 # ── Database functions ────────────────────────────────────────────────────────
 def load_df():
@@ -215,8 +366,6 @@ def insert_from_df(udf):
 def apply_recurring():
     today = date.today()
     m = today.strftime("%Y-%m")
-
-    # Recurring expenses
     rec_exp = supabase.table("expenses")\
         .select("category, amount, note")\
         .eq("username", cu).eq("recurring", 1).execute()
@@ -233,8 +382,6 @@ def apply_recurring():
                 "category": row['category'], "amount": row['amount'],
                 "note": row['note'], "recurring": 1
             }).execute()
-
-    # Recurring income
     rec_inc = supabase.table("income")\
         .select("source, amount, note")\
         .eq("username", cu).eq("recurring", 1).execute()
@@ -270,7 +417,6 @@ def generate_expense_pdf(data_df, username, currency_sym):
         sub_style
     ))
     elements.append(Spacer(1, 0.3*cm))
-
     table_data = [['#', 'Date', 'Category', 'Amount', 'Note', 'Recurring']]
     for i, (_, row) in enumerate(data_df.iterrows(), 1):
         table_data.append([
@@ -282,7 +428,6 @@ def generate_expense_pdf(data_df, username, currency_sym):
             'Yes' if row.get('recurring', 0) else 'No'
         ])
     table_data.append(['', '', 'TOTAL', f"{currency_sym}{data_df['amount'].sum():,.2f}", '', ''])
-
     col_widths = [1*cm, 2.8*cm, 3.5*cm, 2.8*cm, 5.5*cm, 2*cm]
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     table.setStyle(TableStyle([
@@ -464,18 +609,15 @@ if page == "dashboard":
         st.info("No expense data for this period.")
 
     st.subheader("📅 Spending heatmap")
-    
     hm_col1, hm_col2 = st.columns(2)
     hm_month = hm_col1.selectbox("Month", list(range(1,13)),
         index=today.month - 1,
         format_func=lambda x: calendar.month_name[x])
     hm_year = hm_col2.number_input("Year", min_value=2020,
         max_value=today.year, value=today.year, step=1)
-    
     hm_start = pd.Timestamp(year=int(hm_year), month=hm_month, day=1)
     _, num_days = calendar.monthrange(int(hm_year), hm_month)
     hm_end = pd.Timestamp(year=int(hm_year), month=hm_month, day=num_days)
-    
     month_filt = df[(df['date'] >= hm_start) & (df['date'] <= hm_end)] if not df.empty else pd.DataFrame()
 
     if month_filt.empty:
@@ -483,11 +625,9 @@ if page == "dashboard":
     else:
         daily_totals = month_filt.groupby(month_filt['date'].dt.day)['amount'].sum()
         first_weekday = calendar.monthrange(int(hm_year), hm_month)[0]
-    
         cols_cal = st.columns(7)
         for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
             cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
-    
         week_cols = st.columns(7)
         all_cells = [""] * first_weekday + list(range(1, num_days+1))
         for i, d in enumerate(all_cells):
@@ -505,7 +645,6 @@ if page == "dashboard":
                     f"<b>{d}</b><br><span style='color:#27500A;font-size:10px'>{amt_str}</span></div>",
                     unsafe_allow_html=True
                 )
-    
 
     st.divider()
     tab1, tab2 = st.tabs(["📋 All Expenses", "🎯 Budgets"])
@@ -729,7 +868,7 @@ elif page == "income":
             if st.form_submit_button("💾 Save Income", use_container_width=True, type="primary"):
                 save_income(inc_date, inc_src, inc_amt, inc_note, int(inc_rec))
                 st.success(f"✅ {SYM}{inc_amt:,.2f} from **{inc_src}** saved!")
-                st.session_state.prefill_src = None; 
+                st.session_state.prefill_src = None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RECURRING
@@ -811,6 +950,33 @@ elif page == "profile":
         m4.metric("Transactions",    len(df))
         m5.metric("Avg Transaction", f"{SYM}{avg_tx:,.0f}")
         m6.metric("Income Sources",  len(income_df['source'].unique()) if not income_df.empty else 0)
+
+    # ── Edit profile section ──────────────────────────────────────────────────
+    st.divider()
+    st.subheader("✏️ Edit Profile")
+    with st.form("edit_profile_form"):
+        ep1, ep2 = st.columns(2)
+        new_display = ep1.text_input("Display Name", value=info['display'])
+        new_avatar  = ep2.selectbox("Avatar", AVATAR_OPTIONS,
+                                    index=AVATAR_OPTIONS.index(info['avatar']) if info['avatar'] in AVATAR_OPTIONS else 0)
+        st.markdown("**Change Password** *(leave blank to keep current)*")
+        pp1, pp2 = st.columns(2)
+        new_pass1 = pp1.text_input("New Password", type='password', placeholder="Min 6 characters")
+        new_pass2 = pp2.text_input("Confirm New Password", type='password')
+        if st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary"):
+            updates = {"display_name": new_display.strip(), "avatar": new_avatar}
+            if new_pass1:
+                if new_pass1 != new_pass2:
+                    st.error("Passwords do not match.")
+                    st.stop()
+                elif len(new_pass1) < 6:
+                    st.error("Password must be at least 6 characters.")
+                    st.stop()
+                else:
+                    updates["password_hash"] = hash_password(new_pass1)
+            supabase.table("users").update(updates).eq("username", cu).execute()
+            st.success("✅ Profile updated! Changes will appear on next page load.")
+            st.rerun()
 
     if not df.empty:
         st.divider()
