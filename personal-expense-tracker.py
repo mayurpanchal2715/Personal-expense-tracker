@@ -506,9 +506,7 @@ if page == "dashboard":
                     unsafe_allow_html=True
                 )
     
-    cols_cal = st.columns(7)
-    for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
-        cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
+
 
    
     week_cols = st.columns(7)
