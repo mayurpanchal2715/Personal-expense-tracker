@@ -510,7 +510,7 @@ if page == "dashboard":
     for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
         cols_cal[i].markdown(f"<p style='text-align:center;font-size:12px;color:gray'>{h}</p>", unsafe_allow_html=True)
 
-    max_amt   = daily_totals.max() if not daily_totals.empty else 1
+   
     week_cols = st.columns(7)
     all_cells = [""] * first_weekday + list(range(1, num_days+1))
     for i, d in enumerate(all_cells):
