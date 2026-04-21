@@ -462,14 +462,22 @@ if page == "dashboard":
     else:
         st.info("No expense data for this period.")
 
-    st.divider()
-    st.subheader("📅 Spending heatmap (this month)")
-    today_dt     = pd.Timestamp(today)
-    month_start  = today_dt.replace(day=1)
-    month_filt   = df[(df['date'] >= month_start) & (df['date'] <= today_dt)]
+    st.subheader("📅 Spending heatmap")
+    
+    hm_col1, hm_col2 = st.columns(2)
+    hm_month = hm_col1.selectbox("Month", list(range(1,13)),
+        index=today.month - 1,
+        format_func=lambda x: calendar.month_name[x])
+    hm_year = hm_col2.number_input("Year", min_value=2020,
+        max_value=today.year, value=today.year, step=1)
+    
+    hm_start = pd.Timestamp(year=int(hm_year), month=hm_month, day=1)
+    _, num_days = calendar.monthrange(int(hm_year), hm_month)
+    hm_end = pd.Timestamp(year=int(hm_year), month=hm_month, day=num_days)
+    
+    month_filt   = df[(df['date'] >= hm_start) & (df['date'] <= hm_end)]
     daily_totals = month_filt.groupby(month_filt['date'].dt.day)['amount'].sum()
-    _, num_days  = calendar.monthrange(today.year, today.month)
-    first_weekday = calendar.monthrange(today.year, today.month)[0]
+    first_weekday = calendar.monthrange(int(hm_year), hm_month)[0]
 
     cols_cal = st.columns(7)
     for i, h in enumerate(["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]):
