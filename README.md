@@ -47,7 +47,7 @@ pip install -r requirements.txt
 
 4. Run the application
 
-streamlit run xyz.py
+streamlit run personal-expense-tracker.py
 
 ---
 
